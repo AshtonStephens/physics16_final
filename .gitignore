@@ -17,6 +17,7 @@ eggs/
 bin
 etc
 share
+pyvenv.cfg
 lib/
 lib64
 parts/

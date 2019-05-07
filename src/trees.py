@@ -5,6 +5,7 @@ import numpy as np
 from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+from sklearn.externals import joblib
 
 # load data
 # dataset = loadtxt('pima-indians-diabetes.csv', delimiter=",")
@@ -42,9 +43,24 @@ seed = 7
 test_size = 0.33
 X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=test_size, random_state=seed)
 
-# fit model no training data
-model = XGBClassifier()
-model.fit(X_train, y_train)
+
+def build_xgb(max_depth=8, n_trees=150, eta=0.01)
+	model = XGBClassifier(max_depth=max_depth, learning_rate=eta, n_estimators=150)
+	return model
+
+
+def train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, filename):
+	model.fit(
+		X_train, Y_train, eval_set=[(X_val, Y_val)], 
+		sample_weight_eval_set=[w_val], early_stopping_rounds=10, eval_metric='auc')
+	joblib.dump(model, filename)
+	loaded_model = joblib.load(filename)
+	return loaded_model
+
+
+def predict_xgb(model, X_test):
+	return model.predict(X_test, ntree_limit=model.best_ntree_limit)
+
 
 # make predictions for test data
 y_pred = model.predict(X_test)
