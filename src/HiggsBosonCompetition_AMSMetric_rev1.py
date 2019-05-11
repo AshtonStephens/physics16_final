@@ -13,28 +13,27 @@ import csv
 import math
 
 
-def create_solution_dictionary(solution):
+def create_solution_dictionary(solution_file):
 	""" Read solution file, return a dictionary with key EventId and value (weight,label).
 	Solution file headers: EventId, Label, Weight """
 	
 	solnDict = {}
-	soln = csv.reader(solution)
-	next(soln, None) # header
-	for row in soln:
-		print(row)
-		if row[0] not in solnDict:
-			solnDict[row[0]] = (row[1], row[2])
+	with open(solution_file, 'r') as f:
+		soln = csv.reader(f)
+		next(soln, None) # header
+		for row in soln:
+			if row[0] not in solnDict:
+				solnDict[row[0]] = (row[1], row[2])
 	return solnDict
 
 		
-def check_submission(submission, Nelements):
+def check_submission(submission_file, Nelements):
 	""" Check that submission RankOrder column is correct:
 		1. All numbers are in [1,NTestSet]
 		2. All numbers are unqiue
 	"""
-	submission = submission.to_csv()
 	rankOrderSet = set()    
-	with open(submission, 'rb') as f:
+	with open(submission_file, 'r') as f:
 		sub = csv.reader(f)
 		next(sub, None) # header
 		for row in sub:
@@ -43,7 +42,7 @@ def check_submission(submission, Nelements):
 	if len(rankOrderSet) != Nelements:
 		print('RankOrder column must contain unique values')
 		exit()
-	elif rankOrderSet.isdisjoint(set(xrange(1,Nelements+1))) == False:
+	elif rankOrderSet.isdisjoint(set(range(1,Nelements+1))) == False:
 		print('RankOrder column must contain all numbers from [1..NTestSset]')
 		exit()
 	else:
@@ -68,34 +67,36 @@ def AMS(s, b):
 
 def AMS_metric(solution, submission):
 	"""  Prints the AMS metric value to screen.
-	Solution File header: EventId, Class, Weight
-	Submission File header: EventId, RankOrder, Class
+	Solution File header: EventId, Label, Weight
+	Submission File header: EventId, RankOrder, Label
 	"""
 	
 	# numEvents = 550000 # number of events = size of test set
 	numEvents = solution.shape[0]
-	print(solution)
-	solution = solution.to_csv()
-	submission = submission.to_csv()
+	solution_file = "solution1.csv"
+	submission_file = "submission1.csv"
+	solution.to_csv(solution_file, index=False)
+	submission.to_csv(submission_file, index=False)
 	
 	# solutionDict: key=eventId, value=(label, class)
-	solutionDict = create_solution_dictionary(solution)
+	solutionDict = create_solution_dictionary(solution_file)
 
 	signal = 0.0
 	background = 0.0
-	if check_submission(submission, numEvents):
-		sub = csv.reader(submission)
-		next(sub, None) # header row
-		for row in sub:
-			if row[2] == 's': # only events predicted to be signal are scored
-				if solutionDict[row[0]][0] == 's':
-					signal += float(solutionDict[row[0]][1])
-				elif solutionDict[row[0]][0] == 'b':
-					background += float(solutionDict[row[0]][1])
- 
-		print('signal = {0}, background = {1}'.format(signal, background))
-		AMS_score = AMS(signal, background)
-		print('AMS = ' + str(AMS_score))
+	if check_submission(submission_file, numEvents):
+		with open(submission_file, 'r') as f:
+			sub = csv.reader(f)
+			next(sub, None) # header row
+			for row in sub:
+				if row[2] == 's': # only events predicted to be signal are scored
+					if solutionDict[row[0]][0] == 's':
+						signal += float(solutionDict[row[0]][1])
+					elif solutionDict[row[0]][0] == 'b':
+						background += float(solutionDict[row[0]][1])
+	 
+			print('signal = {0}, background = {1}'.format(signal, background))
+			AMS_score = AMS(signal, background)
+			print('AMS = ' + str(AMS_score))
 	return AMS_score
 
 
