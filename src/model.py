@@ -213,6 +213,7 @@ def predict_xgb(model, X_test):
 
 
 if __name__ == '__main__':
+<<<<<<< HEAD
     sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
     X, Y, w, sol, X_test, rand = load_data(TRAIN_FILE, 
                                            TEST_FILE, 
@@ -232,3 +233,25 @@ if __name__ == '__main__':
     
     # rand_preds = np.random.rand(rand.shape[0])
     # create_submission(rand_preds, rand)
+=======
+	sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+	X, Y, w, sol, X_test, rand = load_data(TRAIN_FILE, 
+										   TEST_FILE, 
+										   RAND_FILE)
+	X_train, X_val, Y_train, Y_val, w_val, sol_test = split_data(X, Y, w, sol)
+	model = build_NN()
+	trained = train_NN(model, X_train, Y_train, X_val, Y_val, w_val, '../models/modelNN_2.h5')
+	preds = predict_NN(trained, X_val)
+	sub = create_submission(preds, sol_test)
+	print(sub)
+	# print(evaluate(sub, sol_test))
+
+	# model = build_NN()
+	# trained = train_NN(model, X_train, Y_train, X_val, Y_val, w_val, 'model1.h5')
+	# preds = trained.predict(X_test)
+	# sub = create_submission(preds, rand)
+	# print(evaluate(sub, sol_test))
+	
+	# rand_preds = np.random.rand(rand.shape[0])
+	# create_submission(rand_preds, rand)
+>>>>>>> e8fc41cfda872e0fc755938844c8c4cd57e370a2
