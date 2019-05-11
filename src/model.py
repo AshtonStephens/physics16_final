@@ -184,7 +184,7 @@ def train_NN(model, X_train, Y_train, X_val, Y_val, w_val, filename):
 	                   verbose=0, mode='auto')
 	checkpoint = ModelCheckpoint(filename, monitor='val_loss', 
 								 verbose=0, save_best_only=True, mode='auto')
-	model.fit(X_train, Y_train, batch_size=64, epochs=30,
+	model.fit(X_train, Y_train, batch_size=64, epochs=2, # TWO EPOCHS
 			  callbacks=[es,checkpoint], validation_data=(X_val, Y_val, w_val))
 	final_model = load_model(filename)
 	return final_model
