@@ -82,19 +82,21 @@ def create_submission(preds, rand):
 		Predictions for each test example, between 0-1.
 
 	rand : Pandas Dataframe, shape of (N, 3)
-		Random submission, Header (EventId, RankOrder, Label).
+		Random submission, Header (EventId, RankOrder, Class).
 
 	Returns
 	-------
 	sub : Pandas Dataframe, shape of (N, 3)
-		Edited submission, Header (EventId, RankOrder, Label).
+		Edited submission, Header (EventId, RankOrder, Class).
 	"""
 	rank = np.argsort(preds) + 1
-	binary_preds = pd.DataFrame((preds > 0.5), dtype='str')
-	binary_preds = binary_preds.replace(['True', 'False'], ['s', 'b'])
+	print(rank)
+	binary_preds = pd.DataFrame((preds > 0.5))
+	binary_preds = binary_preds.replace([True, False], ['s', 'b'])
+	print(binary_preds)
 	rand['RankOrder'] = rank
 	rand['Class'] = binary_preds
-	return rand
+	return rand[['EventId', 'RankOrder', 'Class']]
 
 
 def evaluate(submission, solution):
@@ -142,6 +144,7 @@ def build_NN(input_shape=30, h_size=600):
 			  Dense(1, activation='sigmoid')]
 	for layer in layers:
 		model.add(layer)
+	print(model.summary())
 	return model
 
 
@@ -180,7 +183,7 @@ def train_NN(model, X_train, Y_train, X_val, Y_val, w_val, filename):
 				  metrics=['accuracy'])
 	es = EarlyStopping(monitor='val_loss',
 	                   min_delta=0,
-	                   patience=3,
+	                   patience=0,
 	                   verbose=0, mode='auto')
 	checkpoint = ModelCheckpoint(filename, monitor='val_loss', 
 								 verbose=0, save_best_only=True, mode='auto')
@@ -222,8 +225,9 @@ if __name__ == '__main__':
 	model = build_NN()
 	trained = train_NN(model, X_train, Y_train, X_val, Y_val, w_val, '../models/modelNN_2.h5')
 	preds = predict_NN(trained, X_val)
-	sub = create_submission(preds, rand)
-	print(evaluate(sub, sol_test))
+	sub = create_submission(preds, sol_test)
+	print(sub)
+	# print(evaluate(sub, sol_test))
 
 	# model = build_NN()
 	# trained = train_NN(model, X_train, Y_train, X_val, Y_val, w_val, 'model1.h5')
