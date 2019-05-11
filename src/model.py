@@ -1,11 +1,11 @@
-import csv
+import csv, os
 
 import numpy as np 
 import pandas as pd
 import scipy
 import matplotlib.pyplot as plt 
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold
 from sklearn.externals import joblib
 
 from keras.layers import Dense, Input, Dropout, Activation, Flatten, Softmax
@@ -57,20 +57,89 @@ def load_data(train_file, test_file, rand_file):
         Submission template, columns are event_id, rank_order, label
     """
     train = pd.read_csv(train_file)
-    X_train = train.iloc[:, 1:31].to_numpy()
+    X_train = train.iloc[:, 1:31]
     Y_train = (train.iloc[:, 32] == 's').to_numpy(dtype=int)
     w_train = train.iloc[:, 31].to_numpy()
     sol_train = train[['EventId', 'Label', 'Weight']]
-    X_test = pd.read_csv(test_file, usecols=range(1,31)).to_numpy()
+    X_test = pd.read_csv(test_file, usecols=range(1,31))
     rand = pd.read_csv(rand_file)
     return X_train, Y_train, w_train, sol_train, X_test, rand
 
 
-def split_data(X, Y, w, sol, test_size=0.1, seed=420):
-    X_train, X_val, Y_train, Y_val, _, w_val, _, sol_test = (
-        train_test_split(X, Y, w, sol, test_size=test_size, random_state=seed))
-    return X_train, X_val, Y_train, Y_val, w_val, sol_test
+def split_data(train_indices, val_indices, X, Y, w, sol):
+    return (X.iloc[train_indices], X.iloc[val_indices], Y[train_indices], 
+            Y[val_indices],   w[val_indices], sol.iloc[val_indices])
 
+
+def add_features(*dfs):
+    
+    def add_mass_features(df):
+        tau = calc_p(df['PRI_tau_pt'], df['PRI_tau_phi'], df['PRI_tau_eta'])
+        lep = calc_p(df['PRI_lep_pt'], df['PRI_lep_phi'], df['PRI_lep_eta'])
+        jet_1 = calc_p(df['PRI_jet_leading_pt'], 
+                       df['PRI_jet_leading_phi'], 
+                       df['PRI_jet_leading_eta'])
+        jet_2 = calc_p(df['PRI_jet_subleading_pt'], 
+                       df['PRI_jet_subleading_phi'], 
+                       df['PRI_jet_subleading_eta'])
+        df['MASS_1'] = np.log(1 + m_inv(tau, jet_1))
+        df['MASS_2'] = np.log(1 + m_inv(tau, jet_2))
+        df['MASS_3'] = np.log(1 + m_inv(tau, lep))
+        df['MASS_4'] = np.log(1 + m_tr(tau, jet_1))
+        df['MASS_5'] = np.log(1 + m_tr(tau, jet_2))
+        return df
+    
+    def add_radian_features(df):
+        diff_tau_lep = (
+            ((df.PRI_tau_phi - df.PRI_lep_phi) - np.pi) % (2*np.pi)) - np.pi
+
+        diff_tau_met = (
+            ((df.PRI_tau_phi - df.PRI_met_phi) - np.pi) % (2*np.pi)) - np.pi
+
+        diff_lep_met = (
+            ((df.PRI_lep_phi - df.PRI_met_phi) - np.pi) % (2*np.pi)) - np.pi
+
+        df['RAD_min_tltm']   = np.minimum(diff_tau_lep, diff_tau_met)
+        df['RAD_min_tltmlm'] = np.minimum(df.RAD_min_tltm, diff_lep_met)
+        df['RAD_min_tmlm']   = np.minimum(diff_tau_met, diff_lep_met)
+        df['RAD_min_lm']     = diff_lep_met
+        return df
+    return (add_mass_features(add_radian_features(df)) for df in dfs)
+
+
+def calc_p(pt, phi, eta):
+    p_x = pt * np.cos(phi)
+    p_y = pt * np.sin(phi)
+    p_z = pt * np.sinh(eta)
+    return pd.DataFrame({'p_x': p_x, 'p_y': p_y, 'p_z': p_z})
+
+
+def m_inv(a, b):
+    a_x, a_y, a_z = a['p_x'], a['p_y'], a['p_z']
+    b_x, b_y, b_z = b['p_x'], b['p_y'], b['p_z']
+    norm_a = np.sqrt(a_x**2 + a_y**2 + a_z**2)
+    norm_b = np.sqrt(b_x**2 + b_y**2 + b_z**2)
+    sq_sum = (a_x + b_x)**2 + (a_y + b_y)**2 + (a_z + b_z)**2
+    return np.sqrt((norm_a + norm_b)**2 - sq_sum)
+
+
+def m_tr(a, b):
+    a_x, a_y = a['p_x'], a['p_y']
+    b_x, b_y = b['p_x'], b['p_y']
+    norm_a = np.sqrt(a_x**2 + a_y**2)
+    norm_b = np.sqrt(b_x**2 + b_y**2)
+    sq_sum = (a_x + b_x)**2 + (a_y + b_y)**2
+    return np.sqrt((norm_a + norm_b)**2 - sq_sum)    
+
+
+def next_model_filename(model_type):
+    file_nums = [int(file.replace('model_', '').replace('.h5', ''))
+                     for file in os.listdir("../models/" + model_type)]
+    if not file_nums: 
+        return '../models/' + model_type + '/model_0.h5'
+    filename = ('../models/' + model_type + '/model_' + 
+                str(max(file_nums) + 1) + '.h5')
+    return filename
 
 
 def create_submission(preds, rand):
@@ -193,10 +262,20 @@ def predict_NN(model, X_test):
     return model.predict(X_test).flatten()
 
 
-def build_xgb(max_depth=8, n_trees=150, eta=0.01):
-    model = XGBClassifier(max_depth=max_depth, learning_rate=eta, n_estimators=150)
-    return model
+def predict_n_NN(X_test):
+    preds = np.zeros(X_test.shape[0])
+    num_models = 0
+    for model_filename in os.listdir('../models/NN'):
+        model = load_model(model_filename)
+        preds += predict_NN(model, X_test)
+        num_models += 1
+    return preds / num_models
 
+
+def build_xgb(max_depth=8, n_trees=300, eta=0.01):
+    return XGBClassifier(
+            max_depth=max_depth, learning_rate=eta, n_estimators=n_trees)
+    
 
 def train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, filename):
     model.fit(
@@ -211,15 +290,34 @@ def predict_xgb(model, X_test):
     return model.predict(X_test, ntree_limit=model.best_ntree_limit)
 
 
+def predict_n_xgb(X_test):
+    preds = np.zeros(X_test.shape[0])
+    num_models = 0
+    for model_filename in os.listdir('../models/XGB'):
+        model = joblib.load(model_filename)
+        preds += predict_xgb(model, X_test)
+        num_models += 1
+    return preds / num_models
+
+
+def train_n_models(N, build, train, model_type, X, Y, w, sol):
+    for train_ind, val_ind in KFold(n_splits=N).split(Y):
+        X_train, X_val, Y_train, Y_val, w_val, sol_test = (
+                split_data(train_ind, val_ind, X, Y, w, sol))
+        model = build()
+        filename = next_model_filename(model_type)
+        # Saves trained model to disk
+        _ = train(model, X_train, Y_train, X_val, Y_val, w_val, filename)
+
 
 if __name__ == '__main__':
-    sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
     X, Y, w, sol, X_test, rand = load_data(TRAIN_FILE, 
                                            TEST_FILE, 
                                            RAND_FILE)
-    X_train, X_val, Y_train, Y_val, w_val, sol_test = split_data(X, Y, w, sol)
-    model = build_xgb()
-    trained = train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, '../models/modelNN_2.h5')
-    preds = predict_xgb(trained, X_val)
-    sub = create_submission(preds, sol_test.copy())
-    print(evaluate(sol_test, sub))
+    X, X_test = add_features(X, X_test)
+    # N = 20
+    # train_n_models(N, build_xgb, train_xgb, 'XGB', X, Y, w, sol)
+    preds = predict_n_xgb(X_test)
+    sub = create_submission(preds, rand)
+    sub.to_csv('xgb_submission_1.csv')
+    # print(evaluate(sol_test, sub))
