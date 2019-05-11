@@ -67,13 +67,71 @@ def load_data(train_file, test_file, rand_file):
 
 
 def split_data(train_indices, val_indices, X, Y, w, sol):
+    """Splits data into training and validation sets.
+
+    Parameters
+    ----------
+    train_indices : Array-like of ints
+        Indices for training set.
+
+    val_indices : Array-like of ints
+        Indices for validation set.
+
+    X : Pandas Dataframe, shape of (N, F)
+        Full training data.
+
+    Y : Numpy array, shape of (N)
+        Full training labels (binary).
+
+    w : Numpy array, shape of (N)
+        Weights for each training example.
+
+    sol : Pandas Dataframe, shape of (N, 3)
+        Solution for training data, used for local validation/scoring.
+
+    Returns
+    -------
+    X_train : Pandas Dataframe, shape of (J, F)
+        Training data.
+
+    X_val : Pandas Dataframe, shape of (K, F)
+        Validation data.
+
+    Y_train : Numpy array, shape of (J)
+        Training labels (binary).
+
+    Y_val : Numpy array, shape of (K)
+        Validation labels (binary).
+
+    w_val : Numpy array, shape of (K)
+        Validation example weights.
+
+    sol : Pandas Dataframe, shape of (K, 3)
+        Solution for validation data, used for local validation/scoring. 
+    """
     return (X.iloc[train_indices], X.iloc[val_indices], Y[train_indices], 
             Y[val_indices],   w[val_indices], sol.iloc[val_indices])
 
 
 def add_features(*dfs):
+    """Adds hand-picked features to input dataframes.
+
+    Parameters
+    ----------
+    dfs : Iterable, of Pandas Dataframes
+        Input data to augment. 
+
+    Returns
+    -------
+    augmented_dfs : Tuple, of Pandas Dataframes
+        Augmented data, adds 9 new columns.
+        Five mass features and four radian features: 
+        - MASS_[1-5]
+        - 'RAD_min_tltm', 'RAD_min_tltmlm', 'RAD_min_tmlm', 'RAD_min_lm'
+    """
     
     def add_mass_features(df):
+        """Adds mass-based features to a single Pandas Dataframe"""
         tau = calc_p(df['PRI_tau_pt'], df['PRI_tau_phi'], df['PRI_tau_eta'])
         lep = calc_p(df['PRI_lep_pt'], df['PRI_lep_phi'], df['PRI_lep_eta'])
         jet_1 = calc_p(df['PRI_jet_leading_pt'], 
@@ -90,6 +148,7 @@ def add_features(*dfs):
         return df
     
     def add_radian_features(df):
+        """Adds radian-based features to a single Pandas Dataframe"""
         diff_tau_lep = (
             ((df.PRI_tau_phi - df.PRI_lep_phi) - np.pi) % (2*np.pi)) - np.pi
 
@@ -104,10 +163,29 @@ def add_features(*dfs):
         df['RAD_min_tmlm']   = np.minimum(diff_tau_met, diff_lep_met)
         df['RAD_min_lm']     = diff_lep_met
         return df
+    
     return (add_mass_features(add_radian_features(df)) for df in dfs)
 
 
 def calc_p(pt, phi, eta):
+    """Calculates momentum of a particle.
+
+    Parameters
+    ----------
+    pt : Pandas series of floats
+        Transverse momentum.
+
+    phi : Pandas series of floats
+        Azimuthal angle.
+
+    eta : Pandas series of floats
+        Pseudorapidity.
+
+    Returns
+    -------
+    df_p : Pandas Dataframe
+        Momentum in each direction, Header (p_x, p_y, p_z)
+    """
     p_x = pt * np.cos(phi)
     p_y = pt * np.sin(phi)
     p_z = pt * np.sinh(eta)
@@ -115,6 +193,22 @@ def calc_p(pt, phi, eta):
 
 
 def m_inv(a, b):
+    """Calculates invariant mass of two particles a and b.
+
+    Parameters
+    ----------
+    a : Pandas Dataframe
+        Momentum in each direction, Header (p_x, p_y, p_z)
+
+    b : Pandas Dataframe
+        Momentum in each direction, Header (p_x, p_y, p_z)
+
+    Returns
+    -------
+    m : Pandas Series
+        Invariant mass of the two particles.
+    """
+
     a_x, a_y, a_z = a['p_x'], a['p_y'], a['p_z']
     b_x, b_y, b_z = b['p_x'], b['p_y'], b['p_z']
     norm_a = np.sqrt(a_x**2 + a_y**2 + a_z**2)
@@ -124,6 +218,21 @@ def m_inv(a, b):
 
 
 def m_tr(a, b):
+    """Calculates transverse mass of two particles a and b.
+
+    Parameters
+    ----------
+    a : Pandas Dataframe
+        Momentum in each direction, Header (p_x, p_y, p_z)
+
+    b : Pandas Dataframe
+        Momentum in each direction, Header (p_x, p_y, p_z)
+
+    Returns
+    -------
+    m : Pandas Series
+        Transverse mass of the two particles.
+    """
     a_x, a_y = a['p_x'], a['p_y']
     b_x, b_y = b['p_x'], b['p_y']
     norm_a = np.sqrt(a_x**2 + a_y**2)
@@ -133,6 +242,17 @@ def m_tr(a, b):
 
 
 def next_model_filename(model_type):
+    """Returns next model filename to save to.
+
+    Parameters
+    ----------
+    model_type : Str, either 'NN' or 'XGB'
+
+    Returns
+    -------
+    filename : Str
+        The next model filename.
+    """
     file_nums = [int(file.replace('model_', '').replace('.h5', ''))
                      for file in os.listdir("../models/" + model_type)]
     if not file_nums: 
@@ -242,7 +362,7 @@ def train_NN(model, X_train, Y_train, X_val, Y_val, w_val, filename):
     Returns
     -------
     model : Keras Sequential object
-        Untrained model object.
+        Trained model object.
     """
     model.compile(loss='binary_crossentropy', optimizer='adam',
                   metrics=['accuracy'])
@@ -259,10 +379,15 @@ def train_NN(model, X_train, Y_train, X_val, Y_val, w_val, filename):
 
 
 def predict_NN(model, X_test):
+    """Returns predictions of NN model on X_test as a Numpy array."""
     return model.predict(X_test).flatten()
 
 
 def predict_n_NN(X_test):
+    """
+    Returns predictions on X_test using an ensemble of 
+    neural net models saved on disk.
+    """
     preds = np.zeros(X_test.shape[0])
     num_models = 0
     for model_filename in os.listdir('../models/NN'):
@@ -273,11 +398,59 @@ def predict_n_NN(X_test):
 
 
 def build_xgb(max_depth=8, n_trees=300, eta=0.01):
+    """Builds XGB model.
+
+    Parameters
+    ----------
+    max_depth : Int, default=8
+        Maximum depth of each decision tree stump.
+
+    n_trees : Int, default=300
+        Maximum number of tree estimators.
+
+    eta : Float, default=0.01
+        Learning rate.
+
+    Returns
+    -------
+    model : XGBClassifier object
+        Untrained XGB model.
+    """
     return XGBClassifier(
             max_depth=max_depth, learning_rate=eta, n_estimators=n_trees)
     
 
 def train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, filename):
+    """Trains an XGB classifier and saves it to filename.
+
+    Parameters
+    ----------
+    model : XGBClassifier object
+        Untrained XGB model.
+
+    X_train : Array-like of floats, shape of (N, F)
+        Training examples.
+
+    Y_train : Array-like of ints, shape of (N)
+        Training labels.
+
+    X_val : Array-like of floats, shape of (M, F)
+        Validation examples.
+
+    Y_val : Array-like of ints, shape of (M)
+        Validation labels.
+
+    w_val : Array-like of floats, shape of (M)
+        Weights for each example, used in computing loss function.
+
+    filename : Str
+        File to save trained model, ideally ending in ".h5"
+
+    Returns
+    -------
+    model : XGBClassifier object
+        Trained model object.
+    """
     model.fit(
         X_train, Y_train, eval_set=[(X_val, Y_val)], verbose=True,
         sample_weight_eval_set=[w_val], early_stopping_rounds=10, eval_metric='auc')
@@ -287,10 +460,15 @@ def train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, filename):
 
 
 def predict_xgb(model, X_test):
+    """Returns predictions of XGB model on X_test as a Numpy array."""
     return model.predict(X_test, ntree_limit=model.best_ntree_limit)
 
 
 def predict_n_xgb(X_test):
+    """
+    Returns predictions on X_test using an ensemble of 
+    gradient-boosted tree models saved on disk.
+    """
     preds = np.zeros(X_test.shape[0])
     num_models = 0
     for model_filename in os.listdir('../models/XGB'):
@@ -301,6 +479,33 @@ def predict_n_xgb(X_test):
 
 
 def train_n_models(N, build, train, model_type, X, Y, w, sol):
+    """Trains N models of a certain type and saves them to disk.
+
+    Parameters
+    ----------
+    N : Int, > 0
+        Number of models to train.
+
+    build : Function to build the model, either build_NN or build_xgb.
+
+    train : Function to train the model, either train_NN or train_xgb.
+
+    model_type : Str, either 'NN' or 'XGB'
+
+    X : Pandas Dataframe, shape of (N, F)
+        Full training data.
+
+    Y : Numpy array, shape of (N)
+        Full training labels (binary).
+
+    w : Numpy array, shape of (N)
+        Weights for each training example.
+
+    sol : Pandas Dataframe, shape of (N, 3)
+        Solution for training data, used for local validation/scoring.
+    
+    Returns: None
+    """ 
     for train_ind, val_ind in KFold(n_splits=N).split(Y):
         X_train, X_val, Y_train, Y_val, w_val, sol_test = (
                 split_data(train_ind, val_ind, X, Y, w, sol))
