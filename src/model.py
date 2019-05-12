@@ -2,8 +2,9 @@ import csv, os
 
 import numpy as np 
 import pandas as pd
-import scipy
+from scipy.stats import rankdata
 import matplotlib.pyplot as plt 
+
 
 from sklearn.model_selection import KFold
 from sklearn.externals import joblib
@@ -109,8 +110,9 @@ def split_data(train_indices, val_indices, X, Y, w, sol):
     sol : Pandas Dataframe, shape of (K, 3)
         Solution for validation data, used for local validation/scoring. 
     """
-    return (X.iloc[train_indices], X.iloc[val_indices], Y[train_indices], 
-            Y[val_indices],   w[val_indices], sol.iloc[val_indices])
+    return (X.iloc[train_indices], X.iloc[val_indices], 
+            Y[train_indices], Y[val_indices], 
+            w[train_indices], w[val_indices], sol.iloc[val_indices])
 
 
 def add_features(*dfs):
@@ -164,7 +166,7 @@ def add_features(*dfs):
         df['RAD_min_lm']     = diff_lep_met
         return df
     
-    return (add_mass_features(add_radian_features(df)) for df in dfs)
+    return (add_mass_features(add_radian_features(df)).fillna(0) for df in dfs)
 
 
 def calc_p(pt, phi, eta):
@@ -278,11 +280,11 @@ def create_submission(preds, rand):
     sub : Pandas Dataframe, shape of (N, 3)
         Edited submission, Header (EventId, RankOrder, Class).
     """
-    rank = np.argsort(preds) + 1
+    rank = rankdata(preds, method='ordinal')
     rand['RankOrder'] = rank
-    rand['Label'] = (preds > 0.5)
-    rand['Label'] = rand['Label'].replace([True, False], ['s', 'b'])
-    return rand[['EventId', 'RankOrder', 'Label']]
+    rand['Class'] = (preds > 0.5)
+    rand['Class'] = rand['Class'].replace([True, False], ['s', 'b'])
+    return rand[['EventId', 'RankOrder', 'Class']]
 
 
 def evaluate(submission, solution):
@@ -304,7 +306,7 @@ def evaluate(submission, solution):
     return AMS_metric(submission, solution) 
 
 
-def build_NN(input_shape=30, h_size=600):
+def build_NN(input_shape=39, h_size=200):
     """Builds neural network model.
 
     Parameters
@@ -321,19 +323,20 @@ def build_NN(input_shape=30, h_size=600):
         Untrained model object.
     """
     model = Sequential()
-    layers = [Dense(h_size, activation='relu', input_shape=(input_shape,),
+    layers = [Dense(h_size, activation='elu', input_shape=(input_shape,),
                     kernel_regularizer=regularizers.l1_l2(l1=5e-6, l2=5e-5)), 
               Dropout(0.5),
-              Dense(h_size, activation='relu'),
+              Dense(h_size, activation='elu'),
               Dropout(0.5),
-              Dense(h_size, activation='relu'),
+              Dense(h_size, activation='elu'),
+              Dropout(0.5),
               Dense(1, activation='sigmoid')]
     for layer in layers:
         model.add(layer)
     return model
 
 
-def train_NN(model, X_train, Y_train, X_val, Y_val, w_val, filename):
+def train_NN(model, X_train, Y_train, X_val, Y_val, w_train, w_val, filename):
     """Builds neural network model.
 
     Parameters
@@ -368,12 +371,12 @@ def train_NN(model, X_train, Y_train, X_val, Y_val, w_val, filename):
                   metrics=['accuracy'])
     es = EarlyStopping(monitor='val_loss',
                        min_delta=0,
-                       patience=0,
+                       patience=3,
                        verbose=0, mode='auto')
     checkpoint = ModelCheckpoint(filename, monitor='val_loss', 
                                  verbose=0, save_best_only=True, mode='auto')
-    model.fit(X_train, Y_train, batch_size=64, epochs=1,
-              callbacks=[es,checkpoint], validation_data=(X_val, Y_val, w_val))
+    model.fit(X_train, Y_train, epochs=30, batch_size=64,
+        callbacks=[es,checkpoint], validation_data=(X_val, Y_val))
     final_model = load_model(filename)
     return final_model
 
@@ -390,8 +393,9 @@ def predict_n_NN(X_test):
     """
     preds = np.zeros(X_test.shape[0])
     num_models = 0
-    for model_filename in os.listdir('../models/NN'):
-        model = load_model(model_filename)
+    model_dir = '../models/NN'
+    for model_filename in os.listdir(model_dir):
+        model = load_model(model_dir + '/' + model_filename)
         preds += predict_NN(model, X_test)
         num_models += 1
     return preds / num_models
@@ -420,7 +424,7 @@ def build_xgb(max_depth=8, n_trees=300, eta=0.01):
             max_depth=max_depth, learning_rate=eta, n_estimators=n_trees)
     
 
-def train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, filename):
+def train_xgb(model, X_train, Y_train, X_val, Y_val, w_train, w_val, filename):
     """Trains an XGB classifier and saves it to filename.
 
     Parameters
@@ -452,8 +456,8 @@ def train_xgb(model, X_train, Y_train, X_val, Y_val, w_val, filename):
         Trained model object.
     """
     model.fit(
-        X_train, Y_train, eval_set=[(X_val, Y_val)], verbose=True,
-        sample_weight_eval_set=[w_val], early_stopping_rounds=10, eval_metric='auc')
+        X_train, Y_train, eval_set=[(X_val, Y_val)], verbose=True, 
+        early_stopping_rounds=10, eval_metric='auc')
     joblib.dump(model, filename)
     loaded_model = joblib.load(filename)
     return loaded_model
@@ -471,8 +475,9 @@ def predict_n_xgb(X_test):
     """
     preds = np.zeros(X_test.shape[0])
     num_models = 0
-    for model_filename in os.listdir('../models/XGB'):
-        model = joblib.load(model_filename)
+    model_dir = '../models/XGB'
+    for model_filename in os.listdir(model_dir):
+        model = joblib.load(model_dir + '/' + model_filename)
         preds += predict_xgb(model, X_test)
         num_models += 1
     return preds / num_models
@@ -507,12 +512,12 @@ def train_n_models(N, build, train, model_type, X, Y, w, sol):
     Returns: None
     """ 
     for train_ind, val_ind in KFold(n_splits=N).split(Y):
-        X_train, X_val, Y_train, Y_val, w_val, sol_test = (
+        X_train, X_val, Y_train, Y_val, w_train, w_val, sol_test = (
                 split_data(train_ind, val_ind, X, Y, w, sol))
         model = build()
         filename = next_model_filename(model_type)
         # Saves trained model to disk
-        _ = train(model, X_train, Y_train, X_val, Y_val, w_val, filename)
+        _ = train(model, X_train, Y_train, X_val, Y_val, w_train, w_val, filename)
 
 
 if __name__ == '__main__':
@@ -521,8 +526,9 @@ if __name__ == '__main__':
                                            RAND_FILE)
     X, X_test = add_features(X, X_test)
     # N = 20
-    # train_n_models(N, build_xgb, train_xgb, 'XGB', X, Y, w, sol)
+    # train_n_models(N, build_NN, train_NN, 'NN', X, Y, w, sol)
     preds = predict_n_xgb(X_test)
     sub = create_submission(preds, rand)
-    sub.to_csv('xgb_submission_1.csv')
+    sub.to_csv('../subs/xgb_submission_2.csv', index=False)
     # print(evaluate(sol_test, sub))
+    
